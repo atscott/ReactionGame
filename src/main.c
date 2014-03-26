@@ -18,8 +18,7 @@
 static int keepgoing = 1;	// Set to 0 when ctrl-c is pressed
 
 typedef struct Player {
-    long startTimes[ITERATIONS];
-    long endTimes[ITERATIONS];
+    struct timespec elapsedLatency;
     int currentIteration;
     char name[255];
 } Player;
@@ -35,7 +34,6 @@ void *processPinForPlayer(void* ptr);
 uint32_t setupGpio(uint8_t gpioInputPort, uint8_t gpioOutputPort);
 void startThreadForPlayer(uint32_t gpio_fd, uint8_t outputPin, uint8_t inputPin, Player *player, pthread_t *thread );
 void gpioCleanup(uint32_t gpio_fd, uint8_t inputPin, uint8_t outputPin);
-long getCurrentNs();
 void turnOnLightAfterRandomTime(int outputPin, Player *player);
 void signal_handler(int sig);
 
@@ -59,7 +57,11 @@ int main(int argc, const char* argv[])
     strcpy(player1.name, argv[1]);
     strcpy(player2.name, argv[2]);
 	player1.currentIteration = 0;
+	player1.elapsedLatency.tv_nsec = 0;
+	player1.elapsedLatency.tv_sec = 0;
 	player2.currentIteration = 0;
+	player2.elapsedLatency.tv_nsec = 0;
+	player2.elapsedLatency.tv_sec = 0;
 
 	// Hook up the signal handler
 	signal(SIGINT, signal_handler);
@@ -87,6 +89,10 @@ int main(int argc, const char* argv[])
 
     gpioCleanup(gpio_fd_P1, gpioInputPortP1, gpioOutputPortP1);
     gpioCleanup(gpio_fd_P2, gpioInputPortP2, gpioOutputPortP2);
+
+    printf("\nGame Over!");
+    printf("\nPlayer1 latency was %d", timespectoms(&player1.elapsedLatency));
+    printf("\nPlayer2 latency was %d\n", timespectoms(&player2.elapsedLatency));
 
 	return 0;
 }
@@ -143,6 +149,7 @@ void *processPinForPlayer(void* ptr)
 	int nfds = 2;
 	char buf[MAX_BUF];
 	int len;
+    struct timespec startTime;
 
 	char set_value[5];
 	char prevState;
@@ -150,7 +157,7 @@ void *processPinForPlayer(void* ptr)
 	prevState = '?';
 	timeout = POLL_TIMEOUT;
 
-	while (keepgoing && player->currentIteration < 10) {
+	while (keepgoing && player->currentIteration < 3) {
         memset((void*)fdset, 0, sizeof(fdset));
 
         fdset[0].fd = STDIN_FILENO;
@@ -181,12 +188,17 @@ void *processPinForPlayer(void* ptr)
                 if (buf[0]=='0')
                 {
                     turnOnLightAfterRandomTime(outputPin, player);
+                    clock_gettime(CLOCK_REALTIME, &startTime);
                 }
                 else
                 {
-                    player->endTimes[player->currentIteration] = getCurrentNs();
-                    long reaction = player->endTimes[player->currentIteration] - player->startTimes[player->currentIteration];
-                    printf("Reaction time for %s on round %d was %ld", player->name, player->currentIteration, reaction);
+                    struct timespec endTime;
+                    struct timespec elapsedThisRound;
+                    clock_gettime(CLOCK_REALTIME, &endTime);
+                    timeval_subtract(&elapsedThisRound,&endTime,&startTime);
+
+                    printf("Reaction time for %s on round %d was %d", player->name, player->currentIteration+1, timespectoms(&elapsedThisRound));
+                    timeval_add(&player->elapsedLatency,&player->elapsedLatency,&elapsedThisRound);
 
                     player->currentIteration++;
 
@@ -210,13 +222,6 @@ void turnOnLightAfterRandomTime(int outputPin, Player *player)
     int r = rand() % (MAX_WAIT-MIN_WAIT) + MIN_WAIT;
     usleep(r);
     gpio_set_value(outputPin, 1);
-    player->startTimes[player->currentIteration] = getCurrentNs();
 }
 
 
-long getCurrentNs()
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return ts.tv_nsec;
-}
