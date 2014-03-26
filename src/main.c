@@ -25,13 +25,13 @@ typedef struct Player {
 } Player;
 
 typedef struct ReactionArgs{
-    int gpio_fd;
+    uint32_t gpio_fd;
     int outputPin;
-    uint32_t gpioInputPort;
+    int gpioInputPort;
     Player *player;
 } ReactionArgs;
 
-void *processPinForPlayer(void *ptr);
+void *processPinForPlayer(void* ptr);
 uint32_t setupGpio(uint8_t gpioInputPort, uint8_t gpioOutputPort);
 void startThreadForPlayer(uint32_t gpio_fd, uint8_t outputPin, uint8_t inputPin, Player *player, pthread_t *thread );
 void gpioCleanup(uint32_t gpio_fd, uint8_t inputPin, uint8_t outputPin);
@@ -70,9 +70,9 @@ int main(int argc, const char* argv[])
 	gpioInputPortP2 = 27;
 	gpioOutputPortP2 = 46;
 
-	printf("Hello players %s and %s \n",argv[1],argv[2]);
-	printf("\n%s will use the Left Button.",argv[1]);
-	printf("\n%s will use the Right Button.",argv[2]);
+	printf("Hello players %s and %s \n",player1.name,player2.name);
+	printf("\n%s will use the Left Button.",player1.name);
+	printf("\n%s will use the Right Button.",player2.name);
 
     gpio_fd_P1 = setupGpio(gpioInputPortP1, gpioOutputPortP1);
     gpio_fd_P2 = setupGpio(gpioInputPortP2, gpioOutputPortP2);
@@ -114,11 +114,12 @@ uint32_t setupGpio(uint8_t gpioInputPort, uint8_t gpioOutputPort)
 void startThreadForPlayer(uint32_t gpio_fd, uint8_t outputPin, uint8_t inputPin, Player *player, pthread_t *thread)
 {
     ReactionArgs *player1Args;
+    player1Args = (ReactionArgs *) malloc(sizeof(ReactionArgs));
     player1Args->gpio_fd = gpio_fd;
     player1Args->outputPin = outputPin;
     player1Args->gpioInputPort = inputPin;
     player1Args->player = player;
-    pthread_create(thread, NULL, processPinForPlayer, (void*)player1Args);
+    pthread_create(thread, NULL, processPinForPlayer, (void *) player1Args);
 }
 
 void gpioCleanup(uint32_t gpio_fd, uint8_t inputPin, uint8_t outputPin)
@@ -128,12 +129,13 @@ void gpioCleanup(uint32_t gpio_fd, uint8_t inputPin, uint8_t outputPin)
     gpio_unexport(outputPin);
 }
 
-void *processPinForPlayer(void *ptr)
+void *processPinForPlayer(void* ptr)
 {
-    ReactionArgs *args = ptr;
-    int gpio_fd = args->gpio_fd;
+    struct ReactionArgs *args;
+    args = (ReactionArgs *) ptr;
+    uint32_t gpio_fd = args->gpio_fd;
     int outputPin = args->outputPin;
-    uint32_t gpioInputPort = args->gpioInputPort;
+    int gpioInputPort = args->gpioInputPort;
     Player *player = args->player;
 
 	struct pollfd fdset[2];
@@ -200,6 +202,7 @@ void *processPinForPlayer(void *ptr)
         }
         fflush(stdout);
     }
+    free(args);
 }
 
 void turnOnLightAfterRandomTime(int outputPin, Player *player)
