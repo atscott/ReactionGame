@@ -16,7 +16,6 @@
 #define ITERATIONS 10
 
 static int keepgoing = 1;	// Set to 0 when ctrl-c is pressed
-void *processPinForPlayer(void *ptr);
 
 typedef struct Player {
     long startTimes[ITERATIONS];
@@ -32,18 +31,101 @@ typedef struct ReactionArgs{
     Player *player;
 } ReactionArgs;
 
+void *processPinForPlayer(void *ptr);
+uint32_t setupGpio(uint8_t gpioInputPort, uint8_t gpioOutputPort);
+void startThreadForPlayer(uint32_t gpio_fd, uint8_t outputPin, uint8_t inputPin, Player *player, pthread_t *thread );
+void gpioCleanup(uint32_t gpio_fd, uint8_t inputPin, uint8_t outputPin);
+long getCurrentNs();
+void turnOnLightAfterRandomTime(int outputPin, Player *player);
+void signal_handler(int sig);
 
-long getCurrentNs(){
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return ts.tv_nsec;
+
+int main(int argc, const char* argv[])
+{
+    Player player1;
+    Player player2;
+    uint32_t gpio_fd_P1;
+	uint32_t gpio_fd_P2;
+	uint8_t gpioInputPortP1;
+	uint8_t gpioOutputPortP1;
+	uint8_t gpioInputPortP2;
+	uint8_t gpioOutputPortP2;
+
+	if(argc != 3) {
+		printf("Please include the two player's names");
+		return 0;
+	}
+
+    strcpy(player1.name, argv[1]);
+    strcpy(player2.name, argv[2]);
+	player1.currentIteration = 0;
+	player2.currentIteration = 0;
+
+	// Hook up the signal handler
+	signal(SIGINT, signal_handler);
+
+	// Hard coded ports
+	gpioInputPortP1 = 47;
+	gpioOutputPortP1 = 26;
+	gpioInputPortP2 = 27;
+	gpioOutputPortP2 = 46;
+
+	printf("Hello players %s and %s \n",argv[1],argv[2]);
+	printf("\n%s will use the Left Button.",argv[1]);
+	printf("\n%s will use the Right Button.",argv[2]);
+
+    gpio_fd_P1 = setupGpio(gpioInputPortP1, gpioOutputPortP1);
+    gpio_fd_P2 = setupGpio(gpioInputPortP2, gpioOutputPortP2);
+
+    pthread_t thread1, thread2;
+
+    startThreadForPlayer(gpio_fd_P1, gpioOutputPortP1, gpioInputPortP1, &player1, &thread1);
+    startThreadForPlayer(gpio_fd_P2, gpioOutputPortP2, gpioInputPortP2, &player2, &thread2);
+
+    pthread_join(thread1,NULL);
+    pthread_join(thread2, NULL);
+
+    gpioCleanup(gpio_fd_P1, gpioInputPortP1, gpioOutputPortP1);
+    gpioCleanup(gpio_fd_P2, gpioInputPortP2, gpioOutputPortP2);
+
+	return 0;
 }
 
-void turnOnLightAfterRandomTime(int outputPin, Player *player){
-    int r = rand() % (MAX_WAIT-MIN_WAIT) + MIN_WAIT;
-    usleep(r);
-    gpio_set_value(outputPin, 1);
-    player->startTimes[player->currentIteration] = getCurrentNs();
+void signal_handler(int sig)
+{
+	printf("Ctrl-c pressed. Exiting game...\n");
+	keepgoing = 0;
+}
+
+uint32_t setupGpio(uint8_t gpioInputPort, uint8_t gpioOutputPort)
+{
+    uint32_t gpio_fd;
+    (void)gpio_export(gpioInputPort);
+	(void)gpio_set_dir(gpioInputPort, 0);
+	(void)gpio_set_edge(gpioInputPort, GPIO_BOTH_EDGES);
+	gpio_fd = gpio_fd_open(gpioInputPort);
+
+    (void)gpio_export(gpioOutputPort);
+	(void)gpio_set_dir(gpioOutputPort, 1);
+	(void)gpio_fd_open(gpioOutputPort);
+	return gpio_fd;
+}
+
+void startThreadForPlayer(uint32_t gpio_fd, uint8_t outputPin, uint8_t inputPin, Player *player, pthread_t *thread)
+{
+    ReactionArgs *player1Args;
+    player1Args->gpio_fd = gpio_fd;
+    player1Args->outputPin = outputPin;
+    player1Args->gpioInputPort = inputPin;
+    player1Args->player = player;
+    pthread_create(thread, NULL, processPinForPlayer, (void*)player1Args);
+}
+
+void gpioCleanup(uint32_t gpio_fd, uint8_t inputPin, uint8_t outputPin)
+{
+    gpio_fd_close(gpio_fd);
+    gpio_unexport(inputPin);
+    gpio_unexport(outputPin);
 }
 
 void *processPinForPlayer(void *ptr)
@@ -122,94 +204,18 @@ void *processPinForPlayer(void *ptr)
 		}
 }
 
-void signal_handler(int sig) {
-	printf("Ctrl-c pressed. Exiting game...\n");
-	keepgoing = 0;
+void turnOnLightAfterRandomTime(int outputPin, Player *player)
+{
+    int r = rand() % (MAX_WAIT-MIN_WAIT) + MIN_WAIT;
+    usleep(r);
+    gpio_set_value(outputPin, 1);
+    player->startTimes[player->currentIteration] = getCurrentNs();
 }
 
-int main(int argc, const char* argv[])
+
+long getCurrentNs()
 {
-    Player player1;
-    Player player2;
-    uint32_t gpio_fd_P1;
-	uint32_t gpio_fd_P2;
-	uint8_t gpioInputPortP1;
-	uint8_t gpioOutputPortP1;
-	uint8_t gpioInputPortP2;
-	uint8_t gpioOutputPortP2;
-	char ioPort[56];
-
-	if(argc != 3) {
-		printf("Please include the two player's names");
-		return 0;
-	}
-
-    strcpy(player1.name, argv[1]);
-    strcpy(player2.name, argv[2]);
-	player1.currentIteration = 0;
-	player2.currentIteration = 0;
-
-	// Hook up the signal handler
-	signal(SIGINT, signal_handler);
-
-	// Hard coded ports
-	gpioInputPortP1 = 47;
-	gpioOutputPortP1 = 26;
-	gpioInputPortP2 = 27;
-	gpioOutputPortP2 = 46;
-
-	printf("Hello players %s and %s \n",argv[1],argv[2]);
-	printf("\n%s will use the Left Button.",argv[1]);		// Player 1
-	printf("\n%s will use the Right Button.",argv[2]);	// Player 2
-
-	// Setup the input ports
-	(void)gpio_export(gpioInputPortP1);
-	(void)gpio_set_dir(gpioInputPortP1, 0);
-	(void)gpio_set_edge(gpioInputPortP1, GPIO_BOTH_EDGES);
-	gpio_fd_P1 = gpio_fd_open(gpioInputPortP1);
-
-	(void)gpio_export(gpioInputPortP2);
-	(void)gpio_set_dir(gpioInputPortP2, 0);
-	(void)gpio_set_edge(gpioInputPortP2, GPIO_BOTH_EDGES);
-	gpio_fd_P2 = gpio_fd_open(gpioInputPortP2);
-
-	// Setup the output ports
-	(void)gpio_export(gpioOutputPortP1);
-	(void)gpio_set_dir(gpioOutputPortP1, 1);
-	(void)gpio_fd_open(gpioOutputPortP1);
-
-	(void)gpio_export(gpioOutputPortP2);
-	(void)gpio_set_dir(gpioOutputPortP2, 1);
-	(void)gpio_fd_open(gpioOutputPortP2);
-
-    pthread_t thread1, thread2;
-    int iret1, iret2;
-
-    ReactionArgs *player1Args;
-    player1Args->gpio_fd = gpio_fd_P1;
-    player1Args->outputPin = gpioOutputPortP1;
-    player1Args->gpioInputPort = gpioInputPortP1;
-    player1Args->player = &player1;
-    iret1 = pthread_create(&thread1, NULL, processPinForPlayer, (void*)player1Args);
-
-    ReactionArgs *player2Args;
-    player2Args->gpio_fd = gpio_fd_P2;
-    player2Args->outputPin = gpioOutputPortP2;
-    player2Args->gpioInputPort = gpioInputPortP2;
-    player2Args->player = &player2;
-    iret2 = pthread_create(&thread2, NULL, processPinForPlayer, (void*)player2Args);
-
-    pthread_join(thread1,NULL);
-    pthread_join(thread2, NULL);
-
-	gpio_fd_close(gpio_fd_P1);
-	gpio_fd_close(gpio_fd_P2);
-
-	// Unexport the pins
-	gpio_unexport(gpioInputPortP1);
-	gpio_unexport(gpioOutputPortP1);
-	gpio_unexport(gpioInputPortP2);
-	gpio_unexport(gpioOutputPortP2);
-
-	return 0;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return ts.tv_nsec;
 }
