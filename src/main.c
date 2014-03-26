@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <string.h>
-
+#include <pthread.h>
 #define POLL_TIMEOUT (1 *1000)
 #define MAX_BUF 64
 #define MAX_WAIT 6000000
@@ -16,7 +16,7 @@
 #define ITERATIONS 10
 
 static int keepgoing = 1;	// Set to 0 when ctrl-c is pressed
-
+void *processPinForPlayer(void *ptr);
 
 typedef struct Player {
     long startTimes[ITERATIONS];
@@ -24,6 +24,13 @@ typedef struct Player {
     int currentIteration;
     char name[255];
 } Player;
+
+typedef struct ReactionArgs{
+    int gpio_fd;
+    int outputPin;
+    uint32_t gpioInputPort;
+    Player *player;
+} ReactionArgs;
 
 
 long getCurrentNs(){
@@ -39,8 +46,16 @@ void turnOnLightAfterRandomTime(int outputPin, Player *player){
     player->startTimes[player->currentIteration] = getCurrentNs();
 }
 
-int processPinForPlayer(int gpio_fd, int outputPin, uint32_t gpioInputPort, Player *player)
+void *processPinForPlayer(void *ptr)
 {
+    ReactionArgs *args = ptr;
+    int gpio_fd = args->gpio_fd;
+    int outputPin = args->outputPin;
+    uint32_t gpioInputPort = args->gpioInputPort;
+    Player *player = args->player;
+
+
+
 	struct pollfd fdset[2];
 	int timeout, rc;
 	int nfds = 2;
@@ -66,7 +81,7 @@ int processPinForPlayer(int gpio_fd, int outputPin, uint32_t gpioInputPort, Play
 
 			if (rc < 0) {
 				printf("\npoll() failed!\n");
-				return -1;
+				return (void*)"";
 			}
 
 			if (rc == 0) {
@@ -106,7 +121,6 @@ int processPinForPlayer(int gpio_fd, int outputPin, uint32_t gpioInputPort, Play
 			fflush(stdout);
 		}
 }
-
 
 void signal_handler(int sig) {
 	printf("Ctrl-c pressed. Exiting game...\n");
@@ -168,13 +182,26 @@ int main(int argc, const char* argv[])
 	(void)gpio_set_dir(gpioOutputPortP2, 1);
 	(void)gpio_fd_open(gpioOutputPortP2);
 
+    pthread_t thread1, thread2;
+    int iret1, iret2;
 
-	// Spawn on separate threads
-	processPinForPlayer(gpio_fd_P1, gpioOutputPortP1, gpioInputPortP1, &player1);
-	keepgoing=1;
-	processPinForPlayer(gpio_fd_P2, gpioOutputPortP2, gpioInputPortP2, &player2);
+    ReactionArgs *player1Args;
+    player1Args->gpio_fd = gpio_fd_P1;
+    player1Args->outputPin = gpioOutputPortP1;
+    player1Args->gpioInputPort = gpioInputPortP1;
+    player1Args->player = &player1;
+    iret1 = pthread_create(&thread1, NULL, processPinForPlayer, (void*)player1Args);
 
-	// Join threads and close
+    ReactionArgs *player2Args;
+    player2Args->gpio_fd = gpio_fd_P2;
+    player2Args->outputPin = gpioOutputPortP2;
+    player2Args->gpioInputPort = gpioInputPortP2;
+    player2Args->player = &player2;
+    iret2 = pthread_create(&thread2, NULL, processPinForPlayer, (void*)player2Args);
+
+    pthread_join(thread1,NULL);
+    pthread_join(thread2, NULL);
+
 	gpio_fd_close(gpio_fd_P1);
 	gpio_fd_close(gpio_fd_P2);
 
