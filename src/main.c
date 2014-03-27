@@ -157,7 +157,7 @@ void *processPinForPlayer(void* ptr)
 	prevState = '?';
 	timeout = POLL_TIMEOUT;
 
-	while (keepgoing && player->currentIteration < 3) {
+	while (keepgoing && player->currentIteration < 10) {
         memset((void*)fdset, 0, sizeof(fdset));
 
         fdset[0].fd = STDIN_FILENO;
@@ -180,8 +180,6 @@ void *processPinForPlayer(void* ptr)
         if (fdset[1].revents & POLLPRI) {
             lseek(fdset[1].fd, 0, SEEK_SET);  // Read from the start of the file
             len = read(fdset[1].fd, buf, MAX_BUF);
-            printf("\npoll() GPIO %d interrupt occurred, value=%c, len=%d\n",
-                 gpioInputPort, buf[0], len);
 
             if (buf[0]!=prevState)
             {
@@ -197,7 +195,7 @@ void *processPinForPlayer(void* ptr)
                     clock_gettime(CLOCK_REALTIME, &endTime);
                     timeval_subtract(&elapsedThisRound,&endTime,&startTime);
 
-                    printf("Reaction time for %s on round %d was %d", player->name, player->currentIteration+1, timespectoms(&elapsedThisRound));
+                    printf("\nReaction time for %s on round %d was %d", player->name, player->currentIteration+1, timespectoms(&elapsedThisRound));
                     timeval_add(&player->elapsedLatency,&player->elapsedLatency,&elapsedThisRound);
 
                     player->currentIteration++;
@@ -210,7 +208,6 @@ void *processPinForPlayer(void* ptr)
         }
         if (fdset[0].revents & POLLIN) {
             (void)read(fdset[0].fd, buf, 1);
-            printf("\npoll() stdin read 0x%2.2X\n", (unsigned int) buf[0]);
         }
         fflush(stdout);
     }
@@ -222,6 +219,7 @@ void turnOnLightAfterRandomTime(int outputPin, Player *player)
     int r = rand() % (MAX_WAIT-MIN_WAIT) + MIN_WAIT;
     usleep(r);
     gpio_set_value(outputPin, 1);
+    printf("\nTurning on %d", outputPin);
 }
 
 
